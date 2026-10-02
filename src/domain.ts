@@ -33,15 +33,90 @@ export const createStarterDocument = (): LayoutDocument => ({
   ],
 });
 
-export const createElement = (kind: ElementKind, index: number, field: FieldSize): ExpoElement => {
+// 新元素与场地边缘保留的内边距。
+const PLACEMENT_MARGIN = 0.5;
+// 生成候选落点时相对已有元素边界的偏移；坐标舍入到 0.1 m 后仍不小于最小通道。
+const PLACEMENT_GAP = MIN_CHANNEL + 0.1;
+// 兜底间距：场地碎片化时只要不重叠且留有目视可辨的间隙即可，提示用户间距偏紧。
+const TIGHT_GAP = 0.3;
+
+export interface PlacementSpot {
+  x: number;
+  y: number;
+  tight: boolean;
+}
+
+const round1 = (value: number) => Number(value.toFixed(1));
+
+/**
+ * 在场地内为一个给定尺寸的新元素寻找落点：
+ * 1. 优先找四周间距不小于最小通道的位置，落位后检查面板不会新增任何记录；
+ * 2. 找不到时退而求其次，找任何不重叠且留有目视间隙的位置（tight=true）；
+ * 3. 连不重叠的位置都没有时返回 null，由调用方拒绝添加。
+ * 候选位置取场地左上角及每个已有元素的右侧、下侧边界，按从上到下、从左到右
+ * 排序，因此总是落在“第一个空当”里，位置固定且用户一眼可见。
+ */
+export const findFreePlacement = (
+  width: number,
+  height: number,
+  field: FieldSize,
+  elements: ExpoElement[],
+): PlacementSpot | null => {
+  const maxX = field.width - PLACEMENT_MARGIN - width;
+  const maxY = field.height - PLACEMENT_MARGIN - height;
+  if (maxX < PLACEMENT_MARGIN - 1e-9 || maxY < PLACEMENT_MARGIN - 1e-9) return null;
+
+  const occupied = elements.map(getBoundingBox);
+  const separated = (left: number, top: number, gap: number) => {
+    const right = left + width;
+    const bottom = top + height;
+    return occupied.every((box) =>
+      right <= box.left - gap + 1e-9 ||
+      left >= box.right + gap - 1e-9 ||
+      bottom <= box.top - gap + 1e-9 ||
+      top >= box.bottom + gap - 1e-9);
+  };
+  const inside = (left: number, top: number) =>
+    left >= PLACEMENT_MARGIN - 1e-9 && top >= PLACEMENT_MARGIN - 1e-9 &&
+    round1(left + width) <= field.width - PLACEMENT_MARGIN + 1e-9 &&
+    round1(top + height) <= field.height - PLACEMENT_MARGIN + 1e-9;
+
+  const axisCandidates = (size: number, max: number, edge: (box: ReturnType<typeof getBoundingBox>) => [number, number]) => {
+    // 均匀参考点保证开阔空当（如场地中部）也有候选起点；已有元素边界保证密集排布时不遗漏缝隙。
+    const span = max - PLACEMENT_MARGIN;
+    const grid = [0, 0.25, 0.5, 0.75, 1].map((ratio) => round1(PLACEMENT_MARGIN + span * ratio));
+    const values = Array.from(new Set([
+      ...grid,
+      ...occupied.flatMap((box) => {
+        const [lead, trail] = edge(box);
+        return [round1(lead + PLACEMENT_GAP), round1(lead + TIGHT_GAP), round1(trail), round1(trail - PLACEMENT_GAP + size), round1(trail - TIGHT_GAP + size)];
+      }),
+    ]));
+    return values.filter((value) => value >= PLACEMENT_MARGIN - 1e-9 && value <= max + 1e-9).sort((a, b) => a - b);
+  };
+  const candidatesX = axisCandidates(width, maxX, (box) => [box.right, box.left]);
+  const candidatesY = axisCandidates(height, maxY, (box) => [box.bottom, box.top]);
+
+  for (const [gap, tight] of [[MIN_CHANNEL, false], [TIGHT_GAP, true]] as const) {
+    for (const y of candidatesY) {
+      for (const x of candidatesX) {
+        const left = round1(x);
+        const top = round1(y);
+        if (inside(left, top) && separated(left, top, gap)) return { x: left, y: top, tight };
+      }
+    }
+  }
+  return null;
+};
+
+export const createElement = (kind: ElementKind, index: number, spot: PlacementSpot): ExpoElement => {
   const spec = ELEMENT_SPECS[kind];
-  const offset = Math.min(index * 0.65, 4);
   return {
     id: `${kind}-${Date.now()}-${index}`,
     kind,
     name: `${spec.label} ${index + 1}`,
-    x: Math.max(0.5, Math.min(field.width - spec.width - 0.5, (field.width - spec.width) / 2 + offset)),
-    y: Math.max(0.5, Math.min(field.height - spec.height - 0.5, (field.height - spec.height) / 2 + offset)),
+    x: spot.x,
+    y: spot.y,
     width: spec.width,
     height: spec.height,
     rotation: 0,

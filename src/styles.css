@@ -79,6 +79,11 @@ button { cursor: pointer; }
 .canvas-element.is-overlap { border-color: #e86b58; background-image: repeating-linear-gradient(135deg, #e86b5813 0, #e86b5813 4px, transparent 4px, transparent 8px); }
 .canvas-element.is-channel { border-color: #e5ae58; }
 .canvas-element.is-out { outline: 2px dashed #ef795f; filter: saturate(1.2); }
+.canvas-element.is-just-added { z-index: 5; animation: just-added-pop 1.5s ease-out 2; }
+@keyframes just-added-pop {
+  0%, 100% { box-shadow: 0 0 0 0 #ef795f28, 0 5px 12px #4d627326; }
+  50% { box-shadow: 0 0 0 7px #ef795f3d, 0 8px 18px #ef795f40; }
+}
 .element-icon { font-size: 15px; line-height: 1; opacity: .8; }
 .element-name { max-width: 100%; overflow: hidden; margin-top: 4px; font: 600 clamp(8px, .8vw, 11px) 'Space Grotesk'; white-space: nowrap; text-overflow: ellipsis; }
 .canvas-element small { margin-top: 2px; opacity: .68; font: 8px 'DM Mono'; }

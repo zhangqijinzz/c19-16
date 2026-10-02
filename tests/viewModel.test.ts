@@ -9,6 +9,13 @@ const fakeRepository = (initial: LayoutDocument | null = null): LayoutRepository
   save: vi.fn(async (_document) => {}),
 });
 
+const tinyDocument = (): LayoutDocument => ({
+  version: 1,
+  title: '紧凑场地',
+  field: { width: 6, height: 5 },
+  elements: [{ id: 'booth-0', kind: 'booth', name: '已有展位', x: 0.5, y: 0.5, width: 5, height: 3.5, rotation: 0 }],
+});
+
 describe('ExpoSketchViewModel', () => {
   it('initializes and updates the selected layout', async () => {
     const repository = fakeRepository();
@@ -50,5 +57,32 @@ describe('ExpoSketchViewModel', () => {
     const before = vm.state.document.elements[0].width;
     vm.resizeSelected(0, 0);
     expect(vm.state.document.elements[0].width).toBe(before);
+  });
+
+  it('places repeated additions into free spots without creating overlap records', () => {
+    const repository = fakeRepository();
+    const vm = new ExpoSketchViewModel(repository);
+    const startOverlaps = vm.state.analysis.overlaps.length;
+    vm.addElement('booth');
+    vm.addElement('booth');
+    vm.addElement('booth');
+    expect(vm.state.document.elements).toHaveLength(8);
+    expect(vm.state.analysis.overlaps).toHaveLength(startOverlaps);
+    expect(vm.state.notice.tone).toBe('success');
+    expect(vm.state.justAddedId).toBe(vm.state.selectedId);
+  });
+
+  it('rejects an addition that cannot fit without stacking it onto others', async () => {
+    const initial = tinyDocument();
+    const save = vi.fn(async () => {});
+    const vm = new ExpoSketchViewModel({ load: vi.fn(async () => initial), save });
+    await vm.initialize();
+    const count = vm.state.document.elements.length;
+    vm.addElement('booth');
+    expect(vm.state.document.elements).toHaveLength(count);
+    expect(vm.state.analysis.overlaps).toHaveLength(0);
+    expect(vm.state.notice.tone).toBe('error');
+    expect(vm.state.notice.message).toContain('扩大场地');
+    expect(save).not.toHaveBeenCalled();
   });
 });

@@ -1,4 +1,4 @@
-import { createElement, createStarterDocument, analyzeLayout, findElement, getBoundingBox, normalizeRotation } from './domain';
+import { createElement, createStarterDocument, analyzeLayout, findElement, findFreePlacement, getBoundingBox, normalizeRotation, ELEMENT_SPECS } from './domain';
 import type { LayoutRepository } from './repository';
 import type { Analysis, ElementKind, LayoutDocument, LayoutMode, Notice, RenderElement, ViewPhase } from './types';
 
@@ -12,6 +12,7 @@ export interface ExpoSketchState {
   analysis: Analysis;
   notice: Notice;
   lastSavedAt: number | null;
+  justAddedId: string | null;
 }
 
 const toRenderElements = (document: LayoutDocument): RenderElement[] => document.elements.map((element) => {
@@ -36,6 +37,7 @@ export class ExpoSketchViewModel {
     analysis: analyzeLayout(createStarterDocument()),
     notice: { tone: 'info', message: '正在恢复最近布局…' },
     lastSavedAt: null,
+    justAddedId: null,
   };
 
   constructor(private readonly repository: LayoutRepository) {}
@@ -56,14 +58,27 @@ export class ExpoSketchViewModel {
     }
   }
 
-  selectElement(id: string) { this.commit({ selectedId: id }); }
+  selectElement(id: string) { this.commit({ selectedId: id, justAddedId: null }); }
 
   setMode(mode: LayoutMode) { this.commit({ mode, notice: { tone: 'info', message: mode === 'inspect' ? '检查模式已开启：拖动元素查看即时提示' : mode === 'path' ? '路径模式已开启：入口到重点区域的访问路线已生成' : '编辑模式已开启' } }); }
 
   addElement(kind: ElementKind) {
-    const element = createElement(kind, this.stateValue.document.elements.length, this.stateValue.document.field);
-    const document = { ...this.stateValue.document, elements: [...this.stateValue.document.elements, element] };
-    this.commitAndPersist({ document, selectedId: element.id, notice: { tone: 'success', message: `${element.name} 已加入场地` } });
+    const { field, elements } = this.stateValue.document;
+    const spec = ELEMENT_SPECS[kind];
+    const spot = findFreePlacement(spec.width, spec.height, field, elements);
+    if (!spot) {
+      this.commit({ notice: { tone: 'error', message: `场地内已找不到能容纳${spec.label}（${spec.width} × ${spec.height} m）且不与其他元素重叠的空位：可先移走或删除部分元素，或在右侧「场地设置」扩大场地尺寸` } });
+      return;
+    }
+    const element = createElement(kind, elements.length, spot);
+    const document = { ...this.stateValue.document, elements: [...elements, element] };
+    const notice: Notice = spot.tight
+      ? { tone: 'warning', message: `${element.name} 已放入最近的空位，未与任何元素重叠，但周边间距偏紧，可拖动它或挪走相邻元素腾出通道` }
+      : { tone: 'success', message: `${element.name} 已放到场地第一个空位，已选中` };
+    this.commitAndPersist({ document, selectedId: element.id, justAddedId: element.id, notice });
+    setTimeout(() => {
+      if (this.stateValue.justAddedId === element.id) this.commit({ justAddedId: null });
+    }, 1600);
   }
 
   removeSelected() {
@@ -75,7 +90,7 @@ export class ExpoSketchViewModel {
 
   moveElement(id: string, x: number, y: number) {
     const elements = this.stateValue.document.elements.map((element) => element.id === id ? { ...element, x: Number(x.toFixed(1)), y: Number(y.toFixed(1)) } : element);
-    this.commitAndPersist({ document: { ...this.stateValue.document, elements } });
+    this.commitAndPersist({ document: { ...this.stateValue.document, elements }, justAddedId: null });
   }
 
   resizeSelected(width: number, height: number) {
