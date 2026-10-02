@@ -51,4 +51,37 @@ describe('ExpoSketchViewModel', () => {
     vm.resizeSelected(0, 0);
     expect(vm.state.document.elements[0].width).toBe(before);
   });
+
+  it('places several added booths without stacking them onto one another', () => {
+    const repository = fakeRepository();
+    const vm = new ExpoSketchViewModel(repository);
+    const startCount = vm.state.document.elements.length;
+    for (let i = 0; i < 4; i += 1) vm.addElement('booth');
+    expect(vm.state.document.elements).toHaveLength(startCount + 4);
+    expect(vm.state.analysis.overlaps).toHaveLength(0);
+    // 每加一个都会选中新元素，并记录为最后加入，方便用户一眼看到
+    expect(vm.state.selectedId).toBe(vm.state.document.elements[vm.state.document.elements.length - 1].id);
+    expect(vm.state.lastAddedId).toBe(vm.state.selectedId);
+  });
+
+  it('refuses to add when the field is full and tells the user what to do', async () => {
+    const document = createStarterDocument();
+    document.field = { width: 12, height: 10 };
+    document.elements = [
+      { id: 'a', kind: 'booth', name: 'a', x: 0.5, y: 0.5, width: 5, height: 3.5, rotation: 0 },
+      { id: 'b', kind: 'booth', name: 'b', x: 6.5, y: 0.5, width: 5, height: 3.5, rotation: 0 },
+      { id: 'c', kind: 'booth', name: 'c', x: 0.5, y: 5, width: 5, height: 3.5, rotation: 0 },
+      { id: 'd', kind: 'booth', name: 'd', x: 6.5, y: 5, width: 5, height: 3.5, rotation: 0 },
+    ];
+    const save = vi.fn(async () => {});
+    const vm = new ExpoSketchViewModel({ load: vi.fn(async () => document), save });
+    await vm.initialize();
+    const countBefore = vm.state.document.elements.length;
+    vm.addElement('booth');
+    expect(vm.state.document.elements).toHaveLength(countBefore);
+    expect(vm.state.analysis.overlaps).toHaveLength(0);
+    expect(vm.state.notice.tone).toBe('warning');
+    expect(vm.state.notice.message).toContain('场地');
+    expect(save).not.toHaveBeenCalled();
+  });
 });

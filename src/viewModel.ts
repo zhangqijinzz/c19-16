@@ -1,4 +1,4 @@
-import { createElement, createStarterDocument, analyzeLayout, findElement, getBoundingBox, normalizeRotation } from './domain';
+import { createElement, createStarterDocument, analyzeLayout, findElement, getBoundingBox, normalizeRotation, ELEMENT_SPECS } from './domain';
 import type { LayoutRepository } from './repository';
 import type { Analysis, ElementKind, LayoutDocument, LayoutMode, Notice, RenderElement, ViewPhase } from './types';
 
@@ -8,6 +8,7 @@ export interface ExpoSketchState {
   renderElements: RenderElement[];
   selectedId: string | null;
   selectedElement: RenderElement | null;
+  lastAddedId: string | null;
   mode: LayoutMode;
   analysis: Analysis;
   notice: Notice;
@@ -32,6 +33,7 @@ export class ExpoSketchViewModel {
     renderElements: starterRenderElements,
     selectedId: 'stage-1',
     selectedElement: starterRenderElements.find((element) => element.id === 'stage-1') ?? null,
+    lastAddedId: null,
     mode: 'edit',
     analysis: analyzeLayout(createStarterDocument()),
     notice: { tone: 'info', message: '正在恢复最近布局…' },
@@ -50,7 +52,7 @@ export class ExpoSketchViewModel {
   async initialize() {
     try {
       const document = await this.repository.load();
-      this.commit({ document, selectedId: document.elements[0]?.id ?? null, phase: 'ready', notice: { tone: 'success', message: '布局已就绪，可开始编辑' } });
+      this.commit({ document, selectedId: document.elements[0]?.id ?? null, lastAddedId: null, phase: 'ready', notice: { tone: 'success', message: '布局已就绪，可开始编辑' } });
     } catch {
       this.commit({ phase: 'error', notice: { tone: 'error', message: '布局读取失败，已载入安全示例' } });
     }
@@ -61,9 +63,27 @@ export class ExpoSketchViewModel {
   setMode(mode: LayoutMode) { this.commit({ mode, notice: { tone: 'info', message: mode === 'inspect' ? '检查模式已开启：拖动元素查看即时提示' : mode === 'path' ? '路径模式已开启：入口到重点区域的访问路线已生成' : '编辑模式已开启' } }); }
 
   addElement(kind: ElementKind) {
-    const element = createElement(kind, this.stateValue.document.elements.length, this.stateValue.document.field);
+    const created = createElement(kind, this.stateValue.document.elements, this.stateValue.document.field);
+    if (!created) {
+      const spec = ELEMENT_SPECS[kind];
+      this.commit({
+        notice: {
+          tone: 'warning',
+          message: `场地里已找不到能放下 ${spec.label}（${spec.width} × ${spec.height} m）且不与其他元素重叠的空位：可在右侧调大场地尺寸，或先移开/删除部分元素后再添加`,
+        },
+      });
+      return;
+    }
+    const { element, tight } = created;
     const document = { ...this.stateValue.document, elements: [...this.stateValue.document.elements, element] };
-    this.commitAndPersist({ document, selectedId: element.id, notice: { tone: 'success', message: `${element.name} 已加入场地` } });
+    this.commitAndPersist({
+      document,
+      selectedId: element.id,
+      lastAddedId: element.id,
+      notice: tight
+        ? { tone: 'warning', message: `${element.name} 已加入场地（已选中），周边空位较紧凑，可拖动调整` }
+        : { tone: 'success', message: `${element.name} 已加入场地，已自动放在不重叠的空位并选中` },
+    });
   }
 
   removeSelected() {

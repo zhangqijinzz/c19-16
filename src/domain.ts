@@ -12,6 +12,81 @@ import type {
 } from './types';
 
 export const MIN_CHANNEL = 1.2;
+export const FIELD_MARGIN = 0.5;
+const PLACEMENT_STEP = 0.1;
+
+export interface Placement {
+  x: number;
+  y: number;
+  /** true 表示该落点仅能保证不重叠，周边间距小于建议通道，摆放较紧凑 */
+  tight: boolean;
+}
+
+/**
+ * 为新元素寻找一个不与已有元素重叠的落点。
+ * 优先保证与周边元素保留 MIN_CHANNEL 的间距（同时避免产生窄通道记录），
+ * 候选位置按距场地中心的距离排序，让新元素落在视野焦点附近；
+ * 只能紧贴摆放时返回 tight=true 的落点；连不重叠都做不到时返回 null。
+ */
+export const findPlacement = (
+  field: FieldSize,
+  width: number,
+  height: number,
+  existing: ExpoElement[],
+): Placement | null => {
+  const maxX = field.width - width - FIELD_MARGIN;
+  const maxY = field.height - height - FIELD_MARGIN;
+  if (maxX < FIELD_MARGIN || maxY < FIELD_MARGIN) return null;
+
+  const occupied = existing.map((element) => {
+    const box = getBoundingBox(element);
+    return { left: box.left, right: box.right, top: box.top, bottom: box.bottom };
+  });
+  const centerX = field.width / 2;
+  const centerY = field.height / 2;
+
+  let fallback: Placement | null = null;
+  let fallbackDistance = Infinity;
+  // 用整数索引驱动网格，避免 0.1 浮点累加导致边界候选点丢失
+  const cols = Math.round((maxX - FIELD_MARGIN) / PLACEMENT_STEP) + 1;
+  const rows = Math.round((maxY - FIELD_MARGIN) / PLACEMENT_STEP) + 1;
+  const candidates: Array<{ x: number; y: number; distance: number }> = [];
+  for (let row = 0; row < rows; row += 1) {
+    const y = Number((FIELD_MARGIN + row * PLACEMENT_STEP).toFixed(1));
+    for (let col = 0; col < cols; col += 1) {
+      const x = Number((FIELD_MARGIN + col * PLACEMENT_STEP).toFixed(1));
+      candidates.push({ x, y, distance: Math.hypot(x + width / 2 - centerX, y + height / 2 - centerY) });
+    }
+  }
+  candidates.sort((first, second) => first.distance - second.distance);
+
+  for (const candidate of candidates) {
+    const right = candidate.x + width;
+    const bottom = candidate.y + height;
+    let comfortable = true;
+    let blocked = false;
+    for (const box of occupied) {
+      const overlapX = intersectionSize(candidate.x, right, box.left, box.right);
+      const overlapY = intersectionSize(candidate.y, bottom, box.top, box.bottom);
+      if (overlapX > 0 && overlapY > 0) { blocked = true; break; }
+      // 投影重叠的那条轴决定并排还是竖排，通行间隙落在另一条轴上；两轴都分离（对角）则无通道问题
+      if (overlapY > 0) {
+        const gap = box.left >= right ? box.left - right : candidate.x - box.right;
+        if (gap < MIN_CHANNEL) comfortable = false;
+      } else if (overlapX > 0) {
+        const gap = box.top >= bottom ? box.top - bottom : candidate.y - box.bottom;
+        if (gap < MIN_CHANNEL) comfortable = false;
+      }
+    }
+    if (blocked) continue;
+    if (comfortable) return { x: candidate.x, y: candidate.y, tight: false };
+    if (!fallback || candidate.distance < fallbackDistance) {
+      fallback = { x: candidate.x, y: candidate.y, tight: true };
+      fallbackDistance = candidate.distance;
+    }
+  }
+  return fallback;
+};
 
 export const ELEMENT_SPECS: Record<ElementKind, ElementSpec> = {
   booth: { kind: 'booth', label: '标准展位', eyebrow: 'BOOTH', icon: '▦', color: '#e7f0ff', width: 5, height: 3.5 },
@@ -33,18 +108,28 @@ export const createStarterDocument = (): LayoutDocument => ({
   ],
 });
 
-export const createElement = (kind: ElementKind, index: number, field: FieldSize): ExpoElement => {
+export interface CreatedElement {
+  element: ExpoElement;
+  tight: boolean;
+}
+
+export const createElement = (kind: ElementKind, existing: ExpoElement[], field: FieldSize): CreatedElement | null => {
   const spec = ELEMENT_SPECS[kind];
-  const offset = Math.min(index * 0.65, 4);
+  const placement = findPlacement(field, spec.width, spec.height, existing);
+  if (!placement) return null;
+  const sameKindCount = existing.filter((element) => element.kind === kind).length;
   return {
-    id: `${kind}-${Date.now()}-${index}`,
-    kind,
-    name: `${spec.label} ${index + 1}`,
-    x: Math.max(0.5, Math.min(field.width - spec.width - 0.5, (field.width - spec.width) / 2 + offset)),
-    y: Math.max(0.5, Math.min(field.height - spec.height - 0.5, (field.height - spec.height) / 2 + offset)),
-    width: spec.width,
-    height: spec.height,
-    rotation: 0,
+    tight: placement.tight,
+    element: {
+      id: `${kind}-${Date.now()}-${sameKindCount}`,
+      kind,
+      name: `${spec.label} ${sameKindCount + 1}`,
+      x: placement.x,
+      y: placement.y,
+      width: spec.width,
+      height: spec.height,
+      rotation: 0,
+    },
   };
 };
 

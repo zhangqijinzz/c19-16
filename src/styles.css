@@ -76,6 +76,8 @@ button { cursor: pointer; }
 .field-label strong { color: #d1d8df; font-weight: 400; }
 .canvas-element { position: absolute; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; padding: 7px 10px; border: 1px solid #b6c7d6; border-radius: 6px; color: #496073; text-align: left; box-shadow: 0 3px 7px #4d627315; transition: box-shadow .15s, border-color .15s, filter .15s; user-select: none; touch-action: none; z-index: 2; }
 .canvas-element:hover, .canvas-element.is-selected { z-index: 4; border: 1.5px solid #ef795f; box-shadow: 0 0 0 3px #ef795f28, 0 5px 12px #4d627326; }
+.canvas-element.is-new { z-index: 5; animation: element-pop-in .8s ease-out 2; }
+@keyframes element-pop-in { 0%, 100% { filter: brightness(1); box-shadow: 0 0 0 3px #ef795f28, 0 5px 12px #4d627326; } 40% { filter: brightness(1.12); box-shadow: 0 0 0 6px #ef795f59, 0 8px 18px #ef795f40; } }
 .canvas-element.is-overlap { border-color: #e86b58; background-image: repeating-linear-gradient(135deg, #e86b5813 0, #e86b5813 4px, transparent 4px, transparent 8px); }
 .canvas-element.is-channel { border-color: #e5ae58; }
 .canvas-element.is-out { outline: 2px dashed #ef795f; filter: saturate(1.2); }
